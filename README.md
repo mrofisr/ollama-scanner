@@ -11,7 +11,7 @@ You can call this scanner from any other repository using this composite action:
 
 ```yaml
 - name: Run Ollama Scanner
-  uses: rofiabdur/ollama-scanner@main
+  uses: mrofisr/ollama-scanner@main
   with:
     shodan-api-key: ${{ secrets.SHODAN_API_KEY }}
     countries: "ID,MY,SG" # Optional: Comma-separated country codes (default: SEA region)
@@ -22,7 +22,7 @@ The scanner supports automatic reporting to Telegram, Discord, and Slack. Simply
 
 ```yaml
 - name: Run Ollama Scanner
-  uses: rofiabdur/ollama-scanner@main
+  uses: mrofisr/ollama-scanner@main
   with:
     shodan-api-key: ${{ secrets.SHODAN_API_KEY }}
     countries: "ID,MY,SG"
@@ -42,7 +42,7 @@ If you'd like to run the scanner on your local machine:
 
 ### Installation
 ```bash
-git clone https://github.com/rofiabdur/ollama-scanner.git
+git clone https://github.com/mrofisr/ollama-scanner.git
 cd ollama-scanner
 uv sync
 ```

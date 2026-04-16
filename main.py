@@ -238,7 +238,7 @@ def generate_report(results: list, prompt: str) -> str:
         f"• *Successful Hosts:* {success_count}",
         f"• *Total Models:* {total_models}",
         "━━━━━━━━━━━━━━━━━━━━━━━━",
-        "✨ _Automated by rofiabdur/ollama-scanner_"
+        "✨ _Automated by mrofisr/ollama-scanner_"
     ]
     
     return "\n".join(header + body + footer)
