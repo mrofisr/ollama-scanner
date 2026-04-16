@@ -1,0 +1,60 @@
+name: 'Ollama SEA Scanner'
+description: 'Automatically scan and test Ollama instances in South East Asia using Shodan and parallel execution.'
+inputs:
+  shodan-api-key:
+    description: 'Your Shodan API Key (optional, defaults to localhost test if missing)'
+    required: false
+  telegram-bot-token:
+    description: 'Telegram Bot Token'
+    required: false
+  telegram-chat-id:
+    description: 'Telegram Chat ID'
+    required: false
+  discord-webhook-url:
+    description: 'Discord Webhook URL'
+    required: false
+  slack-webhook-url:
+    description: 'Slack Webhook URL'
+    required: false
+  countries:
+    description: 'Comma-separated list of country codes to scan (e.g., ID,MY,SG). If empty, scans globally.'
+    required: false
+    default: 'ID,MY,SG,TH,VN,PH'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Restore Database Cache
+      uses: actions/cache@v4
+      with:
+        path: ollama_nodes.db
+        key: ollama-scanner-db-${{ runner.os }}
+        restore-keys: |
+          ollama-scanner-db-
+
+    - name: Run Ollama Scanner
+      shell: bash
+      env:
+        SHODAN_API_KEY: ${{ inputs.shodan-api-key }}
+        TELEGRAM_BOT_TOKEN: ${{ inputs.telegram-bot-token }}
+        TELEGRAM_CHAT_ID: ${{ inputs.telegram-chat-id }}
+        DISCORD_WEBHOOK_URL: ${{ inputs.discord-webhook-url }}
+        SLACK_WEBHOOK_URL: ${{ inputs.slack-webhook-url }}
+        COUNTRIES: ${{ inputs.countries }}
+      run: |
+        uv run --project ${{ github.action_path }} python ${{ github.action_path }}/main.py
+
+    - name: Upload Database Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ollama-scanner-db
+        path: ollama_nodes.db
+        if-no-files-found: ignore

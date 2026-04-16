@@ -1,0 +1,11 @@
+[project]
+name = "ollama-scanner"
+version = "0.1.0"
+description = "Scan for Ollama instances on the internet and test them"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ollama>=0.6.1",
+    "requests>=2.33.1",
+    "shodan>=1.31.0",
+]
