@@ -63,11 +63,11 @@ export COUNTRIES='ID,MY,SG' # Optional: Comma-separated country codes
 uv run python main.py
 ```
 
----
-[📜 License](LICENSE) | [📦 Project Config](pyproject.toml) | [🚀 GitHub Action](action.yml)
-
-### Data Persistence (SQLite)
+## Data Persistence (SQLite)
 The scanner now uses a SQLite database (`ollama_nodes.db`) to track discovered hosts. To avoid redundant testing, it will skip hosts that have already been successfully scanned in the last 24 hours.
 
 - **Storage**: The database is persisted across GitHub runs using `actions/cache`.
 - **Artifacts**: At the end of every run, the updated database is uploaded as a GitHub Artifact (`ollama-scanner-db`) for easy inspection.
+
+---
+[License](LICENSE) | [Project Config](pyproject.toml) | [GitHub Action](action.yml)
