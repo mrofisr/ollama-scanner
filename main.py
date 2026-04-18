@@ -40,10 +40,19 @@ def init_db():
             CREATE TABLE IF NOT EXISTS nodes (
                 host TEXT PRIMARY KEY,
                 last_seen TIMESTAMP,
+                version TEXT,
                 models_count INTEGER,
-                models_list TEXT
+                models_list TEXT,
+                max_tps REAL
             )
         """)
+        # Schema migration: Add columns if they missed them in previous runs
+        try:
+            conn.execute("ALTER TABLE nodes ADD COLUMN version TEXT")
+        except: pass
+        try:
+            conn.execute("ALTER TABLE nodes ADD COLUMN max_tps REAL")
+        except: pass
 
 def filter_new_hosts(hosts: list) -> list:
     """Filter out hosts seen in the last 24 hours."""
@@ -57,12 +66,12 @@ def filter_new_hosts(hosts: list) -> list:
     safe_print(f"🧹 Filtered {len(hosts) - len(new_hosts)} recently scanned hosts.")
     return new_hosts
 
-def save_node_result(host: str, models: list):
+def save_node_result(host: str, version: str, models: list, max_tps: float = 0.0):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
-            INSERT OR REPLACE INTO nodes (host, last_seen, models_count, models_list)
-            VALUES (?, ?, ?, ?)
-        """, (host, datetime.now().isoformat(), len(models), ",".join(models)))
+            INSERT OR REPLACE INTO nodes (host, last_seen, version, models_count, models_list, max_tps)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (host, datetime.now().isoformat(), version, len(models), ",".join(models), max_tps))
 
 def send_notifications(summary_text: str):
     """Send summary to Telegram, Discord, and Slack if configured."""
@@ -81,7 +90,17 @@ def send_notifications(summary_text: str):
     discord_url = os.getenv("DISCORD_WEBHOOK_URL")
     if discord_url:
         try:
-            requests.post(discord_url, json={"content": f"🚀 **Ollama Scanned**\n\n{summary_text}"})
+            # Construct a rich embed for Discord
+            payload = {
+                "embeds": [{
+                    "title": "🚀 Ollama Discovery Report",
+                    "description": summary_text,
+                    "color": 0x5865F2,
+                    "footer": {"text": "Powered by mrofisr/ollama-scanner"},
+                    "timestamp": datetime.utcnow().isoformat()
+                }]
+            }
+            requests.post(discord_url, json=payload)
             safe_print("📡 Notification sent to Discord.")
         except Exception as e:
             safe_print(f"❌ Failed to send Discord: {e}")
@@ -90,7 +109,21 @@ def send_notifications(summary_text: str):
     slack_url = os.getenv("SLACK_WEBHOOK_URL")
     if slack_url:
         try:
-            requests.post(slack_url, json={"text": f"🚀 *Ollama Scanned*\n\n{summary_text}"})
+            # Construct rich blocks for Slack
+            payload = {
+                "blocks": [
+                    {
+                        "type": "header",
+                        "text": {"type": "plain_text", "text": "🚀 Ollama Scanned"}
+                    },
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": summary_text}
+                    },
+                    {"type": "divider"}
+                ]
+            }
+            requests.post(slack_url, json=payload)
             safe_print("📡 Notification sent to Slack.")
         except Exception as e:
             safe_print(f"❌ Failed to send Slack: {e}")
@@ -147,14 +180,19 @@ def test_model(client: ollama.Client, model: str, prompt: str) -> dict:
         response = client.generate(model=model, prompt=prompt)
         elapsed = time.perf_counter() - start
 
-        result = response.response.strip()
+        result = response.get('response', "").strip()
+        eval_count = response.get('eval_count', 0)
+        eval_duration = response.get('eval_duration', 1) # in nanoseconds
+        
+        tps = eval_count / (eval_duration / 1e9) if eval_count > 0 else 0.0
+
         is_gibberish = len(result.split()) > 5 and all(
             any(c.isdigit() for c in word) for word in result.split()[:5]
         )
         status = "⚠️  GIBBERISH" if is_gibberish else "✅ OK"
-        return {"status": status, "response": result[:200], "elapsed": elapsed}
+        return {"status": status, "response": result[:200], "elapsed": elapsed, "tps": tps}
     except Exception as e:
-        return {"status": "❌ ERROR", "response": str(e), "elapsed": 0.0}
+        return {"status": "❌ ERROR", "response": str(e), "elapsed": 0.0, "tps": 0.0}
 
 def process_host(host: str, prompt: str):
     safe_print(f"\n" + "=" * 60)
@@ -162,7 +200,13 @@ def process_host(host: str, prompt: str):
     safe_print("=" * 60)
     
     client = ollama.Client(host=host)
+    version = "Unknown"
     try:
+        # Try to get version
+        v_resp = requests.get(f"{host}/api/version", timeout=5)
+        if v_resp.status_code == 200:
+            version = v_resp.json().get("version", "Unknown")
+        
         models = get_all_models(client)
     except Exception as e:
         safe_print(f"❌ [{host}] Failed to connect: {e}")
@@ -172,32 +216,38 @@ def process_host(host: str, prompt: str):
         safe_print(f"❌ [{host}] No models found.")
         return
 
-    safe_print(f"✅ [{host}] Found {len(models)} model(s): {', '.join(models)}\n")
-    save_node_result(host, models)
+    safe_print(f"✅ [{host}] (v{version}) Found {len(models)} model(s): {', '.join(models)}\n")
     
     timings: dict[str, float] = {}
+    max_host_tps = 0.0
     for model in models:
         result = test_model(client, model, prompt)
         timings[model] = result["elapsed"]
+        if result["tps"] > max_host_tps:
+            max_host_tps = result["tps"]
+
         out = [
             f"\n🤖 [{host}] Model : {model}",
             f"   Status          : {result['status']}",
+            f"   Speed           : {result['tps']:.2f} tokens/s",
             f"   Response        : {result['response']}",
             f"   Time taken      : {result['elapsed']:.2f}s",
             "-" * 60
         ]
         safe_print("\n".join(out))
+    
+    save_node_result(host, version, models, max_host_tps)
 
     if timings:
-        summary = [f"\n📊 [{host}] Response Time Summary"]
+        summary = [f"\n📊 [{host}] Performance Summary"]
         sorted_timings = sorted(timings.items(), key=lambda x: x[1])
         for rank, (model, elapsed) in enumerate(sorted_timings, start=1):
             bar = "█" * int(elapsed * 5)
             summary.append(f"  {rank}. {model:<40} {elapsed:>6.2f}s  {bar}")
         safe_print("\n".join(summary))
-        return {"host": host, "models": len(models), "model_names": models[:5], "status": "✅ Success"}
+        return {"host": host, "version": version, "models": len(models), "model_names": models[:5], "status": "✅ Success", "max_tps": max_host_tps}
     
-    return {"host": host, "models": 0, "model_names": [], "status": "❌ No Models"}
+    return {"host": host, "version": version, "models": 0, "model_names": [], "status": "❌ No Models", "max_tps": 0.0}
 
 def generate_report(results: list, prompt: str) -> str:
     """Generate a beautiful Markdown report for notifications."""
@@ -223,7 +273,7 @@ def generate_report(results: list, prompt: str) -> str:
             total_models += r['models']
             
             # Host line
-            host_line = f"🌐 `{r['host']}`"
+            host_line = f"🌐 `{r['host']}` (v{r.get('version', '?')}) | 🚀 {r.get('max_tps', 0):.1f} tps"
             body.append(host_line)
             
             # Model details line
@@ -242,6 +292,77 @@ def generate_report(results: list, prompt: str) -> str:
     ]
     
     return "\n".join(header + body + footer)
+
+def generate_html_report():
+    """Reads the SQLite database and generates a beautiful HTML report."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM nodes ORDER BY last_seen DESC")
+        rows = cursor.fetchall()
+
+    html_template = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Scanner Report</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        :root {{ --primary: #5865F2; }}
+        body {{ padding: 2rem; }}
+        .status-ok {{ color: #2ecc71; font-weight: bold; }}
+        .tps-badge {{ background: #5865F2; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; }}
+    </style>
+</head>
+<body>
+    <main class="container">
+        <h1>🔍 Ollama Discovery Report</h1>
+        <p>Total instances found: <strong>{count}</strong></p>
+        
+        <figure>
+            <table role="grid">
+                <thead>
+                    <tr>
+                        <th>Host</th>
+                        <th>Version</th>
+                        <th>Models</th>
+                        <th>Max Speed</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {table_rows}
+                </tbody>
+            </table>
+        </figure>
+        
+        <footer>
+            <small>Generated by <a href="https://github.com/mrofisr/ollama-scanner">mrofisr/ollama-scanner</a></small>
+        </footer>
+    </main>
+</body>
+</html>
+    """
+    
+    table_rows = ""
+    for row in rows:
+        models = row['models_list'].replace(",", ", ")
+        table_rows += f"""
+                    <tr>
+                        <td><code>{row['host']}</code></td>
+                        <td>{row['version']}</td>
+                        <td><small>{models}</small></td>
+                        <td><span class="tps-badge">{row['max_tps']:.1f} tokens/s</span></td>
+                        <td>{row['last_seen']}</td>
+                    </tr>
+        """
+    
+    html_content = html_template.format(count=len(rows), table_rows=table_rows)
+    with open("report.html", "w") as f:
+        f.write(html_content)
+    safe_print("📄 HTML report generated: report.html")
 
 if __name__ == "__main__":
     safe_print("--- Ollama Access Scanner & Tester (Automatic Mode) ---")
@@ -279,6 +400,9 @@ if __name__ == "__main__":
     # Send notifications
     report_text = generate_report(run_results, prompt)
     send_notifications(report_text)
+
+    # Generate HTML report
+    generate_html_report()
 
     safe_print("\n" + "=" * 60)
     safe_print("Automatic scan, test, and notification complete.")

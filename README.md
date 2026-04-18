@@ -5,6 +5,15 @@
 
 A fully autonomous tool for discovering and benchmarking Ollama instances across specific regions. It leverages the Shodan API with parallel search patterns and multi-threaded testing to automatically identify accessible hosts, verify available models, and evaluate performance using random test prompts—all without user interaction.
 
+## ✨ Advanced Discovery Features
+
+- **🚀 TPS Benchmarking**: Calculates true Tokens Per Second (TPS) for every tested model instead of just simple execution time.
+- **🛡️ Version Tracking**: Automatically extracts the server version of each exposed Ollama instance.
+- **📊 Rich Reports**:
+  - **HTML Artifacts**: Generates a beautiful, static HTML dashboard (`report.html`) for every run.
+  - **Rich Webhooks**: Discord and Slack notifications now use native Embeds/Blocks for a premium look.
+- **🗄️ SQLite Persistence**: Remembers previously scanned hosts and filters them out for 24 hours to save API credits and reduce noise.
+
 ## Usage as GitHub Action
 
 You can call this scanner from any other repository using this composite action:

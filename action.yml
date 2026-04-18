@@ -58,3 +58,10 @@ runs:
         name: ollama-scanner-db
         path: ollama_nodes.db
         if-no-files-found: ignore
+
+    - name: Upload HTML Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: ollama-scanner-report
+        path: report.html
+        if-no-files-found: ignore
